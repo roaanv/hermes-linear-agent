@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import os
 import re
@@ -949,7 +950,12 @@ class LinearAgentAdapter(BasePlatformAdapter):
             )
             return {"error": "Unauthorized Linear user or team"}, 403
 
-        if self._dedup.is_duplicate(context.delivery_id):
+        # Delivery-id headers are unsigned, so an attacker can resend a captured
+        # body under a fresh id. Also dedup on a hash of the signed body itself:
+        # changing the body invalidates the signature. Paired with the 60 s
+        # webhookTimestamp window this closes replay within the dedup TTL.
+        body_key = "body-sha256:" + hashlib.sha256(raw_body).hexdigest()
+        if self._dedup.is_duplicate(context.delivery_id) or self._dedup.is_duplicate(body_key):
             return {
                 "status": "duplicate",
                 "delivery_id": context.delivery_id,

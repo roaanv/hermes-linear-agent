@@ -238,21 +238,22 @@ def is_stale_body_timestamp(
     *,
     tolerance_seconds: int = 60,
 ) -> bool:
-    """Replay guard for deliveries whose timestamp rides only in the body.
+    """Replay guard on the signed ``webhookTimestamp`` body field.
 
-    Header freshness is enforced during signature verification; without a
-    timestamp header, the signed ``webhookTimestamp`` body field is the only
-    thing stopping a captured delivery from replaying after the dedup TTL.
+    Linear signs the body only, so timestamp *headers* are not covered by the
+    signature and must never stand in for this check: a captured delivery
+    resent with a fresh header would otherwise pass. The body field is always
+    enforced, and its absence fails closed — every genuine Linear webhook
+    carries it. ``headers`` is kept for call-site compatibility.
     """
-    if _header(headers, *TIMESTAMP_HEADERS):
-        return False
+    del headers  # deliberately unused: header timestamps are unsigned
     ts = payload.get("webhookTimestamp")
     if not ts:
-        return False
+        return True
     try:
         ts_value = float(ts)
     except (TypeError, ValueError):
-        return False
+        return True
     ts_seconds = ts_value / 1000 if ts_value > 10_000_000_000 else ts_value
     return abs(time.time() - ts_seconds) > tolerance_seconds
 

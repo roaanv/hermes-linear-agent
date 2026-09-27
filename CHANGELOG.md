@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented here.
 
+## Unreleased
+
+### Security
+
+- Close a webhook replay bypass. Linear signs the request body only, but when any timestamp header was present the freshness check used that unsigned header and skipped the signed `webhookTimestamp` body field, so a captured delivery could be replayed indefinitely by attaching a fresh `Linear-Timestamp`. The body `webhookTimestamp` is now always enforced (±60 s), and a delivery without a parseable one is rejected (fail closed).
+- Deduplicate on a SHA-256 of the signed body in addition to the delivery id. Delivery-id headers are unsigned, so a replay inside the freshness window could previously evade dedup by sending a new `Linear-Delivery` value.
+
 ## 0.4.2 — 2026-07-29
 
 ### Fixed

@@ -206,6 +206,11 @@ class _ActiveMutationAdapter:
 
 
 def _body(payload):
+    # Genuine Linear webhooks always carry a signed webhookTimestamp (Unix ms),
+    # and the adapter rejects deliveries without a fresh one. Default it so
+    # fixtures look like real traffic; tests exercising staleness set it.
+    if isinstance(payload, dict):
+        payload.setdefault("webhookTimestamp", int(time.time() * 1000))
     return json.dumps(payload, separators=(",", ":")).encode("utf-8")
 
 
@@ -1769,6 +1774,88 @@ async def test_stale_body_timestamp_is_rejected():
     raw2 = _body(fresh)
     _, status2 = await adapter.handle_webhook(_headers(raw2, "secret", delivery_id="evt-stale-2"), raw2)
     assert status2 == 200
+
+
+@pytest.mark.asyncio
+async def test_stale_body_timestamp_is_rejected_even_with_fresh_timestamp_header():
+    """Replay guard: Linear signs the body only, so a Linear-Timestamp header
+    is attacker-controlled. A captured delivery resent with a fresh header must
+    still be rejected on the signed body webhookTimestamp."""
+    adapter = _make_adapter(client=_FakeLinearClient())
+    adapter.handle_message = _noop_handler
+
+    captured = _created_payload()
+    captured["webhookTimestamp"] = int((time.time() - 3600) * 1000)
+    raw = _body(captured)
+    headers = _headers(raw, "secret", delivery_id="evt-replay-hdr")
+    headers["Linear-Timestamp"] = str(int(time.time() * 1000))
+
+    response, status = await adapter.handle_webhook(headers, raw)
+
+    assert status == 400
+    assert "Stale" in response["error"]
+
+
+@pytest.mark.asyncio
+async def test_delivery_without_body_timestamp_is_rejected():
+    """Fail closed: every genuine Linear webhook carries a signed
+    webhookTimestamp. Without it there is no freshness guarantee at all."""
+    adapter = _make_adapter(client=_FakeLinearClient())
+    adapter.handle_message = _noop_handler
+
+    payload = _created_payload()
+    payload.pop("webhookTimestamp", None)
+    raw = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+
+    response, status = await adapter.handle_webhook(_headers(raw, "secret", delivery_id="evt-no-ts"), raw)
+
+    assert status == 400
+    assert "Stale" in response["error"]
+
+
+@pytest.mark.asyncio
+async def test_delivery_with_unparseable_body_timestamp_is_rejected():
+    """Fail closed: a webhookTimestamp that is not a number gives no
+    freshness guarantee and must not be treated as fresh."""
+    adapter = _make_adapter(client=_FakeLinearClient())
+    adapter.handle_message = _noop_handler
+
+    payload = _created_payload()
+    payload["webhookTimestamp"] = "not-a-timestamp"
+    raw = _body(payload)
+
+    response, status = await adapter.handle_webhook(_headers(raw, "secret", delivery_id="evt-bad-ts"), raw)
+
+    assert status == 400
+    assert "Stale" in response["error"]
+
+
+@pytest.mark.asyncio
+async def test_identical_signed_body_is_deduplicated_despite_new_delivery_header():
+    """Replay guard: delivery-id headers are unsigned. Resending the same
+    signed body with a new Linear-Delivery value must be treated as a
+    duplicate, not dispatched to the agent a second time."""
+    adapter = _make_adapter(client=_FakeLinearClient())
+    dispatched = []
+
+    async def _recording_handler(event):
+        dispatched.append(event)
+
+    adapter.handle_message = _recording_handler
+
+    payload = _created_payload()
+    payload["webhookTimestamp"] = int(time.time() * 1000)
+    raw = _body(payload)
+
+    _, first_status = await adapter.handle_webhook(_headers(raw, "secret", delivery_id="evt-original"), raw)
+    replay_response, replay_status = await adapter.handle_webhook(
+        _headers(raw, "secret", delivery_id="evt-forged-new-id"), raw
+    )
+
+    assert first_status == 200
+    assert replay_status == 200
+    assert replay_response["status"] == "duplicate"
+    assert len(dispatched) == 1
 
 
 @pytest.mark.asyncio
