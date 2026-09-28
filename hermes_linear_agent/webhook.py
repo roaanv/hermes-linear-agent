@@ -384,6 +384,16 @@ def extract_context(
     actor = payload.get("actor") if isinstance(payload.get("actor"), dict) else {}
     agent_activity = payload.get("agentActivity") if isinstance(payload.get("agentActivity"), dict) else {}
     activity_actor = agent_activity.get("actor") if isinstance(agent_activity.get("actor"), dict) else {}
+    # Linear's AgentSessionEventWebhookPayload has no top-level `actor`: the human is
+    # agentActivity.userId/user for `prompted` (who sent the message) and
+    # agentSession.creatorId/creator for `created` (who mentioned/delegated). A prompt is
+    # authorized on its sender only — never on the session creator — so a stranger's
+    # follow-up in someone else's session cannot inherit the creator's allowlist entry.
+    activity_user = agent_activity.get("user") if isinstance(agent_activity.get("user"), dict) else {}
+    activity_sender = _string(agent_activity.get("userId") or activity_user.get("id"))
+    session_creator = session.get("creator") if isinstance(session.get("creator"), dict) else {}
+    creator_id = _string(session.get("creatorId") or session_creator.get("id")) if action == "created" else ""
+    creator_name = _string(session_creator.get("name")) if action == "created" else ""
 
     agent_session_id = _string(session.get("id") or payload.get("agentSessionId"))
     if not agent_session_id:
@@ -426,10 +436,18 @@ def extract_context(
         actor_user_id=_string(
             actor.get("id")
             or activity_actor.get("id")
+            or activity_sender
             or payload.get("actorUserId")
             or _get_path(payload, "user", "id")
+            or creator_id
         ),
-        actor_user_name=_string(actor.get("name") or activity_actor.get("name") or _get_path(payload, "user", "name")),
+        actor_user_name=_string(
+            actor.get("name")
+            or activity_actor.get("name")
+            or activity_user.get("name")
+            or _get_path(payload, "user", "name")
+            or creator_name
+        ),
         team_id=_string(team.get("id") or payload.get("teamId")),
         prompt_context=_string(payload.get("promptContext") or session.get("promptContext")),
         guidance=_guidance_text(payload.get("guidance") or session.get("guidance")),
