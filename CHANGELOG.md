@@ -4,6 +4,10 @@ All notable changes to this project will be documented here.
 
 ## Unreleased
 
+### Fixed
+
+- Allow Python 3.14: `requires-python` widened to `>=3.11,<3.15` (Hermes now ships a 3.14 runtime and `hermes plugins enable` refused to resolve the plugin). The full test suite passes on 3.14.7 against current Hermes. (CI matrix still 3.11–3.13; adding 3.14 is a follow-up.)
+
 ### Security
 
 - Close a webhook replay bypass. Linear signs the request body only, but when any timestamp header was present the freshness check used that unsigned header and skipped the signed `webhookTimestamp` body field, so a captured delivery could be replayed indefinitely by attaching a fresh `Linear-Timestamp`. The body `webhookTimestamp` is now always enforced (±60 s), and a delivery without a parseable one is rejected (fail closed).
