@@ -6,6 +6,7 @@ All notable changes to this project will be documented here.
 
 ### Fixed
 
+- Keep the active adapter in process-wide state so `linear_agent_*` tools keep working after Hermes re-imports the plugin. A forced plugin rediscovery in a running gateway re-executes the package: the connected adapter held the old `registry` module while tools registered by the new load saw an empty one, so every tool call failed with "linear_agent platform is not currently connected" while the platform was connected. Standard library only; no private Hermes APIs.
 - Identify the sender of real Linear Agent Session webhooks. Linear's `AgentSessionEventWebhookPayload` has no top-level `actor`; the human is `agentSession.creatorId`/`creator` for `created` and `agentActivity.userId`/`user` for `prompted`. The adapter only looked at `actor.id` and friends, so every genuine session had an empty sender and was denied by the (fail-closed) allowlist — Linear then showed "failed to start". A `prompted` event is authorized on the message's sender only, never on the session creator.
 - Allow Python 3.14: `requires-python` widened to `>=3.11,<3.15` (Hermes now ships a 3.14 runtime and `hermes plugins enable` refused to resolve the plugin). The full test suite passes on 3.14.7 against current Hermes. (CI matrix still 3.11–3.13; adding 3.14 is a follow-up.)
 
